@@ -1,0 +1,222 @@
+---
+title: "Text Analysis:  \nA quick exploration following Julia Silge"
+output: slidy_presentation
+---
+
+Background:
+===
+- Natural Language Processing (NLP) broadly refers to techniques for processing and analyzing natural language data
+- Examples of analytic methods
+   - word frequency
+   - collocation
+   - concordance
+   - text classification
+   - text extraction
+   - word sense disambiguation
+   - clustering
+- Julia Silge's book *Tidy Text Mining* provides an excellent introduction to exploratory analysis of text using R
+- Book freely available at https://www.tidytextmining.com/
+- We'll use her code to explore data pre-processing, and preliminary exploration of sentiment analysis, and word / document frequency
+- Focus today: Term Frequency - Inverse Document Frequency
+
+Packages to install / load
+===
+
+```{r, include = F}
+# aside: including this chunk to avoid verbose print in slides
+library(tidyverse)
+# may need to install these libraries:
+library(tidytext)
+library(janeaustenr)
+library(gutenbergr)
+library(forcats)
+
+```
+
+```{r}
+library(tidyverse)
+# may need to install these libraries:
+library(tidytext)
+library(janeaustenr)
+library(gutenbergr)
+library(forcats)
+
+```
+
+Preliminary Browse
+===
+- Using the `austen_books()` function, we can load text from six Jane Austen novels.
+- These are given to use as lines of text
+```{r}
+original_books = austen_books()
+head(original_books,15)
+```
+
+
+Tokenize
+===
+- Use the `unnest_tokens()` function to isolate individual words
+- inputs: our data frame, the name for the output, and the name for the input
+
+```{r}
+tidy_books = original_books %>%
+  unnest_tokens(word, text)
+head(tidy_books)
+```
+
+
+Word Counts (why we need more cleaning)
+===
+- With the tokens identified, we can look at word frequencies
+- The most commonly-used words are almost never informative about content
+
+```{r}
+tidy_books %>% 
+  group_by(word) %>%
+  summarize(n.obs = n()) %>%
+  arrange(desc(n.obs))
+```
+
+Remove Stop Words
+===
+- `stop_words` (from tidytext library) is a dataset of ~1000 commonly-used words which are not typically useful for analysis
+- remove these words with an `anti_join`
+
+```{r}
+head(stop_words)
+
+tidy_books = tidy_books %>%
+  anti_join(stop_words)
+```
+
+New Frequency Counts
+===
+- Word frequencies without stop words
+```{r}
+tidy_books %>% 
+  group_by(word) %>%
+  summarize(n.obs = n()) %>%
+  arrange(desc(n.obs))
+```
+
+
+
+
+TF-IDF
+===
+- Beyond raw word counts, we can identify words that are *relatively* common
+- "Term Frequency - Inverse Document Frequency" (TF-IDF) is a commonly-used routine to establish relative frequency.
+- this is really the *product* of term frequency and inverse document frequency
+
+$$idf(term) = ln(\frac{n_{documents}}{n_{documents\;containting\; term}})$$
+
+TF-IDF
+===
+- Adding term frequency to Jane Austen books:
+- to start, use the summarized word counts (we'll use the version that includes stop words to start)
+
+```{r}
+book_words = austen_books() %>%
+  unnest_tokens(word, text)
+head(book_words)
+```
+
+- Start by finding word frequencies at the book level:
+```{r, warn = F}
+book_words = book_words %>%
+  group_by(book, word) %>%
+  summarize(n = n()) %>%
+  arrange(desc(n))
+head(book_words)
+```
+
+`bind_tf_idf()` function
+===
+- use the `bind_tf_idf()` function to add term frequeny, inverse document frequency, and tfidf
+
+```{r}
+
+book_tf_idf = book_words %>%
+  bind_tf_idf(word,book,n)
+head(book_tf_idf)
+
+```
+
+- note that the idf for the common words is 0 -- this is because the common words appear in all books $$(ln(1) = 0)$$
+
+Visualizations of TF-IDF
+===
+```{r}
+library(forcats)
+book_tf_idf %>%
+  group_by(book) %>%
+  slice_max(tf_idf, n = 15) %>%
+  ungroup() %>%
+  ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = book)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~book, ncol = 2, scales = "free") +
+  labs(x = "tf-idf", y = NULL)
+```
+
+Application using Physics Texts
+===
+- Use `gutenbergr` library to download raw text:
+
+```{r}
+library(gutenbergr)
+physics <- gutenberg_download(c(37729, 14725, 13476, 30155), 
+                              meta_fields = "author")
+
+```
+
+Aside on `gutenbergr` metadata
+===
+- examine documents using `gutenberg_metadata`
+```{r}
+gutenberg_metadata
+```
+
+
+Physics Texts - light cleaning:
+===
+- Note: using `count` is another strategy for establishing word frequencies (alternative to `group_by()`, `summarize()`, and `arrange()`)
+```{r}
+physics_words <- physics %>%
+  unnest_tokens(word, text) %>%
+  count(author, word, sort = TRUE)
+head(physics_words)
+```
+
+Physics Texts - add TF-IDF and author
+===
+```{r}
+plot_physics <- physics_words %>%
+  bind_tf_idf(word, author, n) %>%
+  mutate(author = factor(author, levels = c("Galilei, Galileo",
+                                            "Huygens, Christiaan", 
+                                            "Tesla, Nikola",
+                                            "Einstein, Albert")))
+
+head(plot_physics)
+
+```
+
+Physics Texts - TF-IDF visualization
+===
+```{r}
+plot_physics %>% 
+  group_by(author) %>% 
+  slice_max(tf_idf, n = 15) %>% 
+  ungroup() %>%
+  mutate(word = reorder(word, tf_idf)) %>%
+  ggplot(aes(tf_idf, word, fill = author)) +
+  geom_col(show.legend = FALSE) +
+  labs(x = "tf-idf", y = NULL) +
+  facet_wrap(~author, ncol = 2, scales = "free")
+
+```
+
+Now You Try!
+===
+- Use the `gutenbergr` utility to explore TF-IDF for a collection of documents *you're* interested in!
+
